@@ -1,54 +1,129 @@
 <!DOCTYPE html>
-<html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>C to Python Transpiler</title>
+    
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1e1e1e; color: white; margin: 0; padding: 20px; }
-        h1 { text-align: center; color: #00bbff; }
-        .editor-container { display: flex; gap: 10px; height: 65vh; margin-top: 20px; }
-        .box { flex: 1; display: flex; flex-direction: column; }
-        label { margin-bottom: 8px; font-weight: bold; color: #ccc; }
-        textarea, .output-screen { 
-            flex: 1; padding: 15px; font-family: 'Consolas', monospace; 
-            font-size: 14px; border: 1px solid #333; border-radius: 4px; 
-            resize: none; outline: none;
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #131313;
+            color: white;
+            margin: 0;
+            padding: 20px;
         }
-        textarea { background: #252526; color: #d4d4d4; }
-        .output-screen { background: #2d2d2d; color: #9cdcfe; overflow-y: auto; white-space: pre-wrap; }
-        .controls { text-align: center; margin-top: 20px; }
-        button { 
-            background: #007acc; color: white; border: none; padding: 12px 30px; 
-            font-size: 16px; border-radius: 4px; cursor: pointer; transition: 0.2s;
+
+        h1 {
+            text-align: center;
+            color: #00bbff;
+            
         }
-        button:hover { background: #005a9e; }
+        h2 {
+            text-align: center;
+            color: #27c5ff;
+            margin-bottom: 4%;
+            
+        }
+
+        .editorBox {
+            display: flex;
+            gap: 10px;
+            height: 65vh;
+            margin-top: 20px;
+        }
+
+        .box {
+            
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 25px;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #ccc;
+        }
+
+        textarea,
+        .outputScreen {
+            flex: 1;
+            padding: 15px;
+            font-family: 'Consolas', monospace;
+            font-size: 20px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            resize: none;
+            outline: none;
+        }
+
+        textarea {
+            background: #252526;
+            color: #d4d4d4;
+        }
+
+        .outputScreen {
+            background: #2d2d2d;
+            color: #9cdcfe;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .controls {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        button {
+            width: 200px;
+            display: block;
+            margin: auto;
+            margin-top: 20px;
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background: #005a9e;
+        }
     </style>
 </head>
+
 <body>
-    <h1>C → Python Transpiler</h1>
-    <div class="editor-container">
+    <h1>PyLator</h1>
+    <h2>Implementing a Source-to-Source Transcompiler Using Compiler Design Principles</h2>
+    <hr>
+    <div class="editorBox">
         <div class="box">
-            <label>C Source Code</label>
+            <label for="input">C Source Code:</label>
             <textarea id="input" placeholder="int main() { ... }"></textarea>
         </div>
         <div class="box">
-            <label>Python Output</label>
-            <div id="output" class="output-screen"># Transpiled code will appear here</div>
+            <label for="output">Python Code:</label>
+            <div id="output" class="outputScreen"># Transpiled code will appear here</div>
         </div>
     </div>
-    <div class="controls">
-        <button onclick="runTranslation()">Convert Code</button>
+
+
+    <div class="button">
+        <button onclick="transpile()">Convert Code</button>
     </div>
 
     <script>
-        async function runTranslation() {
+        async function transpile() {
             const code = document.getElementById('input').value;
-            const outputDiv = document.getElementById('output');
-            
-            if(!code.trim()) return;
+            const outputt = document.getElementById('output');
 
-            outputDiv.innerText = "Translating...";
+            if (!code.trim()) return;
+
+            outputt.innerText = "Translating...";
 
             try {
                 const response = await fetch('/translate', {
@@ -57,11 +132,12 @@
                     body: JSON.stringify({ code: code })
                 });
                 const data = await response.json();
-                outputDiv.innerText = data.python_code;
+                outputt.innerText = data.python_code;
             } catch (err) {
-                outputDiv.innerText = "Error connecting to server.";
+                outputt.innerText = "Error connecting to server.";
             }
         }
     </script>
 </body>
+
 </html>
