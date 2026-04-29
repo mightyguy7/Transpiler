@@ -1,15 +1,27 @@
 from lexer import ASTNode
-
-
 class Optimizer:
 
     def optimize(self, node):
         if node is None:
             return None
-        method = getattr(self, f"optimize_{node.type}", self.generic_optimize)
+
+        # 🟢 handle list
+        if isinstance(node, list):
+            return [self.optimize(n) for n in node]
+
+        # 🔴 FIX: handle string
+        if not hasattr(node, "type"):
+            return node
+
+        method = getattr(self, f"_opt_{node.type}", self._generic)
         return method(node)
 
-    def generic_optimize(self, node):
+    # ---------------- GENERIC ----------------
+
+    def _generic(self, node):
+        if not hasattr(node, "type"):
+            return node
+
         if node.left:
             node.left = self.optimize(node.left)
         if node.right:
@@ -18,10 +30,8 @@ class Optimizer:
         new_children = []
         for c in node.children:
             if isinstance(c, list):
-                new_children.append(
-                    [self.optimize(x) if isinstance(x, ASTNode) else x for x in c]
-                )
-            elif isinstance(c, ASTNode):
+                new_children.append([self.optimize(x) for x in c])
+            elif hasattr(c, "type"):
                 new_children.append(self.optimize(c))
             else:
                 new_children.append(c)
@@ -29,201 +39,175 @@ class Optimizer:
         node.children = new_children
         return node
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ---------------- CONSTANT FOLDING ----------------
 
     def _is_number(self, node):
-        return node is not None and node.type == "NUMBER"
+        return node and node.type == "NUMBER"
 
-    def _num_val(self, node):
+    def _num(self, node):
         return float(node.value)
 
-    def make_number(self, val):
-        if isinstance(val, float) and val.is_integer():
-            val = int(val)
+    def _make_number(self, val):
+        if int(val) == val:
+            return ASTNode("NUMBER", str(int(val)))
         return ASTNode("NUMBER", str(val))
 
-    # ── Constant folding + identity elimination ───────────────────────────────
+    def _fold_binary(self, node, op):
+        if self._is_number(node.left) and self._is_number(node.right):
+            l = self._num(node.left)
+            r = self._num(node.right)
 
-    def optimize_ADD(self, node):
-        node = self.generic_optimize(node)
-        L, R = node.left, node.right
-        # constant folding
-        if self._is_number(L) and self._is_number(R):
-            return self.make_number(self._num_val(L) + self._num_val(R))
-        # identity: x + 0  or  0 + x  → x
-        if self._is_number(R) and self._num_val(R) == 0:
-            return L
-        if self._is_number(L) and self._num_val(L) == 0:
-            return R
+            if op == "+":
+                return self._make_number(l + r)
+            if op == "-":
+                return self._make_number(l - r)
+            if op == "*":
+                return self._make_number(l * r)
+            if op == "/":
+                if r != 0:
+                    return self._make_number(l / r)
+            if op == "%":
+                if r != 0:
+                    return self._make_number(l % r)
+
         return node
 
-    def optimize_SUB(self, node):
-        node = self.generic_optimize(node)
-        L, R = node.left, node.right
-        if self._is_number(L) and self._is_number(R):
-            return self.make_number(self._num_val(L) - self._num_val(R))
-        # identity: x - 0 → x
-        if self._is_number(R) and self._num_val(R) == 0:
-            return L
+    # ---------------- ADD ----------------
+
+    def _opt_ADD(self, node):
+        node = self._generic(node)
+
+        # x + 0 → x
+        if self._is_number(node.right) and node.right.value == "0":
+            return node.left
+        if self._is_number(node.left) and node.left.value == "0":
+            return node.right
+
+        return self._fold_binary(node, "+")
+
+    # ---------------- SUB ----------------
+
+    def _opt_SUB(self, node):
+        node = self._generic(node)
+
+        # x - 0 → x
+        if self._is_number(node.right) and node.right.value == "0":
+            return node.left
+
+        return self._fold_binary(node, "-")
+
+    # ---------------- MUL ----------------
+
+    def _opt_MUL(self, node):
+        node = self._generic(node)
+
+        # x * 1 → x
+        if self._is_number(node.right) and node.right.value == "1":
+            return node.left
+        if self._is_number(node.left) and node.left.value == "1":
+            return node.right
+
+        # x * 0 → 0
+        if self._is_number(node.right) and node.right.value == "0":
+            return ASTNode("NUMBER", "0")
+        if self._is_number(node.left) and node.left.value == "0":
+            return ASTNode("NUMBER", "0")
+
+        return self._fold_binary(node, "*")
+
+    # ---------------- DIV ----------------
+
+    def _opt_DIV(self, node):
+        node = self._generic(node)
+
+        # x / 1 → x
+        if self._is_number(node.right) and node.right.value == "1":
+            return node.left
+
+        return self._fold_binary(node, "/")
+
+    # ---------------- MOD ----------------
+
+    def _opt_MOD(self, node):
+        node = self._generic(node)
+        return self._fold_binary(node, "%")
+
+    # ---------------- CONSTANT PROPAGATION ----------------
+
+    def _opt_PROGRAM(self, node):
+        # PASS 1 → fold
+        node = self._generic(node)
+
+        # PASS 2 → propagate
+        env = {}
+        new_children = []
+
+        for stmt in node.children:
+            if stmt.type == "DECLLIST":
+                stmt = self._decllist_propagate(stmt, env)
+            else:
+                stmt = self._propagate(stmt, env)
+
+            if stmt:
+                new_children.append(stmt)
+
+        node.children = new_children
+
+        # 🔥 PASS 3 → fold again
+        node = self._generic(node)
+
         return node
+    
+    def _decllist_propagate(self, node, env):
+        new_children = []
 
-    def optimize_MUL(self, node):
-        node = self.generic_optimize(node)
-        L, R = node.left, node.right
-        if self._is_number(L) and self._is_number(R):
-            return self.make_number(self._num_val(L) * self._num_val(R))
-        # identity: x * 1  or  1 * x  → x
-        if self._is_number(R) and self._num_val(R) == 1:
-            return L
-        if self._is_number(L) and self._num_val(L) == 1:
-            return R
-        # annihilator: x * 0  or  0 * x  → 0
-        if self._is_number(R) and self._num_val(R) == 0:
-            return self.make_number(0)
-        if self._is_number(L) and self._num_val(L) == 0:
-            return self.make_number(0)
-        return node
-
-    def optimize_DIV(self, node):
-        node = self.generic_optimize(node)
-        L, R = node.left, node.right
-        if self._is_number(L) and self._is_number(R):
-            divisor = self._num_val(R)
-            if divisor == 0:
-                return node  # don't fold / 0
-            return self.make_number(self._num_val(L) / divisor)
-        # identity: x / 1 → x
-        if self._is_number(R) and self._num_val(R) == 1:
-            return L
-        return node
-
-    def optimize_MOD(self, node):
-        node = self.generic_optimize(node)
-        L, R = node.left, node.right
-        if self._is_number(L) and self._is_number(R):
-            divisor = self._num_val(R)
-            if divisor == 0:
-                return node
-            result = self._num_val(L) % divisor
-            return self.make_number(result)
-        # identity: x % 1 → 0
-        if self._is_number(R) and self._num_val(R) == 1:
-            return self.make_number(0)
-        return node
-
-    # ── Compound assignment identity elimination ──────────────────────────────
-
-    def optimize_PLUSEQ(self, node):
-        node = self.generic_optimize(node)
-        # x += 0 → (no-op, but we can't remove it easily; return as-is)
-        if self._is_number(node.right) and self._num_val(node.right) == 0:
-            return None  # signal: remove this statement
-        return node
-
-    def optimize_MINUSEQ(self, node):
-        node = self.generic_optimize(node)
-        if self._is_number(node.right) and self._num_val(node.right) == 0:
-            return None
-        return node
-
-    def optimize_MULEQ(self, node):
-        node = self.generic_optimize(node)
-        if self._is_number(node.right) and self._num_val(node.right) == 1:
-            return None
-        return node
-
-    def optimize_DIVEQ(self, node):
-        node = self.generic_optimize(node)
-        if self._is_number(node.right) and self._num_val(node.right) == 1:
-            return None
-        return node
-
-    def optimize_MODEQ(self, node):
-        node = self.generic_optimize(node)
-        return node
-
-    # ── Assignment: fold right-hand side, then check for self-assignment ──────
-
-    def optimize_ASSIGN(self, node):
-        node = self.generic_optimize(node)
-        L = node.left  # the rhs expression
-        # If rhs reduces to the same variable name, it's a no-op assignment
-        # e.g. a = a  (after folding a + 0 → a the rhs is IDENTIFIER 'a')
-        if (L is not None and L.type == "IDENTIFIER" and L.value == node.value):
-            return None  # remove no-op
-        return node
-
-    # ── Dead-branch elimination ───────────────────────────────────────────────
-
-    def optimize_IF(self, node):
-        node.left = self.optimize(node.left)
-
-        if node.left and node.left.type == "NUMBER":
-            taken = node.children[0] if self._num_val(node.left) != 0 else node.children[1]
-            optimised = [self.optimize(s) for s in taken if isinstance(s, ASTNode)]
-            optimised = [s for s in optimised if s is not None]
-
-            if not optimised:
-                return None
-
-            if len(optimised) == 1:
-                return optimised[0]
-
-            block = ASTNode("BLOCK", children=optimised)
-            return block
-
-        return self.generic_optimize(node)
-
-    # ── List-aware block optimization (removes None stmts) ────────────────────
-
-    def _optimize_stmts(self, stmts):
-        result = []
-        for s in stmts:
-            if not isinstance(s, ASTNode):
-                result.append(s)
-                continue
-            opt = self.optimize(s)
-            if opt is not None:
-                result.append(opt)
-        return result
-
-    def optimize_FUNCTION(self, node):
-        params = node.children[0]
-        body   = node.children[1]
-        node.children = [params, self._optimize_stmts(body)]
-        return node
-
-    def optimize_WHILE(self, node):
-        node.left    = self.optimize(node.left)
-        node.children = self._optimize_stmts(node.children)
-        return node
-
-    def optimize_DO_WHILE(self, node):
-        node.children = self._optimize_stmts(node.children)
-        node.left     = self.optimize(node.left)
-        return node
-
-    def optimize_FOR(self, node):
-        init      = self.optimize(node.children[0])
-        condition = self.optimize(node.children[1])
-        increment = self.optimize(node.children[2])
-        body      = self._optimize_stmts(node.children[3])
-        node.children = [init, condition, increment, body]
-        return node
-
-    def optimize_PROGRAM(self, node):
-        node.children = self._optimize_stmts(node.children)
-        return node
-
-    def optimize_DECLLIST(self, node):
-        new_vars = []
         for child in node.children:
-            opt = self.optimize(child)
-            if opt is not None:
-                new_vars.append(opt)
-        node.children = new_vars
-        return node
+            child = self._propagate(child, env)
+            if child:
+                new_children.append(child)
 
-    def optimize_BLOCK(self, node):
-        node.children = self._optimize_stmts(node.children)
+        node.children = new_children
+        return node
+    
+    def _propagate(self, node, env):
+        if node is None:
+            return None
+
+        if isinstance(node, list):
+            return [self._propagate(n, env) for n in node]
+
+        # 🔴 FIX
+        if not hasattr(node, "type"):
+            return node
+
+        if node.type == "ASSIGN":
+            node.left = self._propagate(node.left, env)
+
+            if hasattr(node.left, "type") and node.left.type == "NUMBER":
+                env[node.value] = node.left.value
+            else:
+                env.pop(node.value, None)
+
+            return node
+
+        if node.type == "IDENTIFIER":
+            if node.value in env:
+                return ASTNode("NUMBER", env[node.value])
+            return node
+
+        if node.left:
+            node.left = self._propagate(node.left, env)
+        if node.right:
+            node.right = self._propagate(node.right, env)
+
+        new_children = []
+        for c in node.children:
+            if isinstance(c, list):
+                new_children.append([self._propagate(x, env) for x in c])
+            elif hasattr(c, "type"):
+                new_children.append(self._propagate(c, env))
+            else:
+                new_children.append(c)
+
+        node.children = new_children
         return node
