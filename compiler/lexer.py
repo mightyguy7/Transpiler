@@ -30,17 +30,17 @@ class Lexer:
             if self.current == "]":
                 tokens.append(Token("RBRACKET", "]")); self.advance(); continue
 
-            #  two-char operators 
+            #  two char opers 
             if self.pos + 1 < len(self.code):
                 two = self.current + self.code[self.pos + 1]
                 if two in {"<=", ">=", "==", "!=", "+=", "-=", "*=", "/=", "%=", "&&", "||"}:
                     tokens.append(Token("OPERATOR", two))
                     self.advance(); self.advance(); continue
 
-            #  increment ++ (before single + is caught as operator)
+            #  increment ++
             if self.current == "+" and self.pos+1 < len(self.code) and self.code[self.pos+1] == "+":
                 tokens.append(Token("INCREMENT", "++")); self.advance(); self.advance(); continue
-            #  add after ++ check
+        
             if self.current == "-" and self.pos+1 < len(self.code) and self.code[self.pos+1] == "-":
                 tokens.append(Token("DECREMENT", "--")); self.advance(); self.advance(); continue
 
@@ -94,20 +94,19 @@ class Lexer:
                     comment += self.current; self.advance()
                 self.advance(); self.advance()
                 tokens.append(Token("COMMENT", comment.strip())); continue
-
-            # identifiers / keywords  -handle long long as single keyword
+ 
             if self.current.isalpha() or self.current == "_":
                 word = ""
                 while self.current and (self.current.isalnum() or self.current == "_"):
                     word += self.current; self.advance()
 
-                #  check for "long long"
+                
                 if word == "long":
                     temp_pos = self.pos
-                    # skip whitespace
+                    
                     while temp_pos < len(self.code) and self.code[temp_pos].isspace():
                         temp_pos += 1
-                    # check next word is "long"
+                    
                     if self.code[temp_pos:temp_pos+4] == "long":
                         next_end = temp_pos + 4
                         if next_end >= len(self.code) or not self.code[next_end].isalnum():
@@ -118,7 +117,7 @@ class Lexer:
                 ttype = "KEYWORD" if word in self.keywords else "IDENTIFIER"
                 tokens.append(Token(ttype, word)); continue
 
-            # single char operators
+            # single char opr
             if self.current in self.operators:
                 tokens.append(Token("OPERATOR", self.current)); self.advance(); continue
             if self.current == ";": tokens.append(Token("SEMICOLON", ";")); self.advance(); continue
@@ -136,7 +135,7 @@ class Lexer:
                     string += self.current; self.advance()
                 self.advance()
                 tokens.append(Token("STRING", string)); continue
-             # char literals 'a'
+             # char literals 
             if self.current == "'":
                 self.advance()
                 char = ""
@@ -210,11 +209,11 @@ class Parser:
                 self.advance()
                 node = ASTNode("CALL", name, children=args)
 
-            # array access: arr[i]
+            # array access arr[i]
             elif self.current and self.current.type == "LBRACKET":
-                self.advance()  # skip [
+                self.advance()  
                 index = self.expression()
-                self.advance()  # skip ]
+                self.advance()  
                 node = ASTNode("ARRAY_ACCESS", name, left=index)
 
             # postfix increment
@@ -299,48 +298,60 @@ class Parser:
 
         if self.current.type == "KEYWORD" and self.current.value == "do":
             return self.do_while_statement()
-        # array index assignment: arr[i] = expr
+
         if self.current.type == "IDENTIFIER" and self.peek() and self.peek().type == "LBRACKET":
             return self.array_assignment()
-        # handle bare blocks { ... }
+
         if self.current.type == "LBRACE":
             stmts = self.block()
             return ASTNode("BLOCK", children=stmts)
+
         if self.current.type == "IDENTIFIER" and self.current.value == "printf":
             return self.printf_statement()
+
         if self.current.type == "IDENTIFIER" and self.current.value == "scanf":
             return self.scanf_statement()
+
         if self.current.type == "KEYWORD" and self.current.value in {"int","void","float", "double", "char","long","long long"}:
             if self.peek() and self.peek().type == "IDENTIFIER":
                 if self.tokens[self.pos+2].type == "LPAREN":
                     return self.function_definition()
             return self.declaration()
+
         if self.current.type == "KEYWORD" and self.current.value == "int":
             return self.declaration()
+
         if self.current.type == "IDENTIFIER" and self.peek() and self.peek().type == "INCREMENT":
             name = self.current.value
-            self.advance()  # skip identifier
-            self.advance()  # skip ++
+            self.advance()
+            self.advance()
             if self.current and self.current.type == "SEMICOLON":
                 self.advance()
             return ASTNode("INC", name)
-        
+
         if self.current.type == "IDENTIFIER" and self.peek() and self.peek().type == "DECREMENT":
             name = self.current.value
             self.advance(); self.advance()
             if self.current and self.current.type == "SEMICOLON": self.advance()
             return ASTNode("DEC", name)
-        
+
         if self.current.type == "IDENTIFIER" and self.peek() and self.peek().type == "OPERATOR":
             return self.assignment()
+
         if self.current.type == "KEYWORD" and self.current.value == "return":
             return self.return_statement()
-        if self.current.type == "IDENTIFIER" and self.current.value == "scanf":
-            return self.scanf_statement()
+
         if self.current.type == "COMMENT":
             text = self.current.value
             self.advance()
             return ASTNode("COMMENT", text)
+
+        if self.current.type == "IDENTIFIER" and self.peek() and self.peek().type == "LPAREN":
+            expr = self.expression()
+            if self.current and self.current.type == "SEMICOLON":
+                self.advance()
+            return expr
+
         raise Exception(f"Unknown statement: {self.current.type} {self.current.value}")
     
     def peek(self):
@@ -349,11 +360,11 @@ class Parser:
         return None
     def array_assignment(self):
         name = self.current.value
-        self.advance()  # skip identifier
-        self.advance()  # skip [
+        self.advance()  
+        self.advance()  
         index = self.expression()
-        self.advance()  # skip ]
-        self.advance()  # skip =
+        self.advance()  
+        self.advance()  
         value = self.expression()
         if self.current and self.current.type == "SEMICOLON":
             self.advance()
@@ -390,10 +401,10 @@ class Parser:
         else:
             raise Exception("Invalid assignment operator")
     def printf_statement(self):
-        self.advance()  # printf
-        self.advance()  # (
+        self.advance()  
+        self.advance()  
 
-        fmt = self.current.value  # format string in print
+        fmt = self.current.value  
         self.advance()
 
         args = []
@@ -411,40 +422,39 @@ class Parser:
         return ASTNode("PRINTF", fmt, children=args)
 
     def declaration(self):
-        type_kw = self.current.value  # save type: int/float/double/char/long/long long
-        self.advance()  # skip 'int'
+        type_kw = self.current.value  
+        self.advance()  
         variables = []
 
         while self.current and self.current.type == "IDENTIFIER":
             var = self.current.value
             self.advance()
 
-            # Array declaration: int arr[5]  or  int arr[] = {1,2,3}
+    
             if self.current and self.current.type == "LBRACKET":
-                self.advance()  # skip [
+                self.advance()  
                 size = None
                 if self.current and self.current.type != "RBRACKET":
                     size = self.current.value
                     self.advance()
-                self.advance()  # skip ]
+                self.advance()  
 
-                # int arr[] = {1, 2, 3}
+                
                 if self.current and self.current.value == "=":
-                    self.advance()  # skip =
-                    self.advance()  # skip {
+                    self.advance()  
+                    self.advance()  
                     elements = []
                     while self.current and self.current.type != "RBRACE":
                         if self.current.type == "COMMA":
                             self.advance()
                             continue
                         elements.append(self.expression())
-                    self.advance()  # skip }
+                    self.advance()  
                     variables.append(ASTNode("ARRAY_INIT", var, children=elements))
                 else:
-                    # int arr[5]  →  arr = [0] * 5
+
                     variables.append(ASTNode("ARRAY_DECL", var, children=[ASTNode("NUMBER", size)]))
 
-            # Normal int a = 5
             elif self.current and self.current.value == "=":
                 self.advance()
                 expr = self.expression()
@@ -464,31 +474,31 @@ class Parser:
         return ASTNode("DECLLIST", value=type_kw, children=variables)
     
     def if_statement(self):
-        self.advance()  # skip if
+        self.advance()  
 
        
         condition = self.expression()
 
         if_body = []
         if self.current and self.current.type == "LBRACE":
-            self.advance()  # skip {
+            self.advance()  
             while self.current and self.current.type != "RBRACE":
                 stmt = self.statement()
                 if stmt: if_body.append(stmt)
-            self.advance()  # skip }
+            self.advance()  
         else:
             stmt = self.statement()
             if stmt: if_body.append(stmt)
 
         else_body = []
         if self.current and self.current.type == "KEYWORD" and self.current.value == "else":
-            self.advance()  # skip else
+            self.advance()  
             if self.current and self.current.type == "LBRACE":
-                self.advance()  # skip {
+                self.advance()  
                 while self.current and self.current.type != "RBRACE":
                     stmt = self.statement()
                     if stmt: else_body.append(stmt)
-                self.advance()  # skip }
+                self.advance()  
             else:
                 stmt = self.statement()
                 if stmt: else_body.append(stmt)
@@ -496,25 +506,24 @@ class Parser:
         return ASTNode("IF", left=condition, children=[if_body, else_body])
     
     def while_statement(self):
-        self.advance()  # skip while
-        # expression() handles ( and ) automatically via factor()'s LPAREN branch
+        self.advance()  
         condition = self.expression()
         body = self.block()
         return ASTNode("WHILE", left=condition, children=body)
 
     def do_while_statement(self):
-        self.advance()  # skip do
+        self.advance()  
         body = self.block()
-        self.advance()  # skip while
-        # expression() handles ( and ) automatically via factor()'s LPAREN branch
+        self.advance()  
+        
         condition = self.expression()
-        self.advance()  # skip ;
+        self.advance()  
         return ASTNode("DO_WHILE", left=condition, children=body)
     
     def for_statement(self):
 
-        self.advance()  # skip for
-        self.advance()  # skip (
+        self.advance()  
+        self.advance()  
 
         init = self.declaration()
 
@@ -526,29 +535,29 @@ class Parser:
 
         condition = ASTNode("COMPARE", op.value, left, right)
 
-        self.advance()  # skip ;
+        self.advance()  
 
-        # increment (general expression)
+        
         increment = self.expression()
 
-        self.advance()  # skip )
+        self.advance()  
 
         body = self.block()
 
         return ASTNode("FOR", children=[init, condition, increment, body])
     def block(self):
-        self.advance()  # skip {
+        self.advance()  
         statements = []
         while self.current and self.current.type != "RBRACE":
             stmt = self.statement()
             if stmt:
                 statements.append(stmt)
-        self.advance()  # skip }
+        self.advance()  
         return statements
     
     def scanf_statement(self):
-        self.advance()  # scanf
-        self.advance()  # (
+        self.advance()  
+        self.advance()  
         fmt = self.current
         self.advance()
         vars = []
@@ -564,45 +573,45 @@ class Parser:
                 continue
 
             self.advance()
-        self.advance()  # )
+        self.advance()  
 
         if self.current and self.current.type == "SEMICOLON":
             self.advance()
 
         return ASTNode("SCANF", fmt.value, children=vars)
     def function_definition(self):
-        self.advance()  # skip return type
+        self.advance()  
 
         name = self.current.value
         self.advance()
-        self.advance()  # skip (
+        self.advance()  
 
         params = []
         while self.current and self.current.type != "RPAREN":
             if self.current.type == "COMMA":
                 self.advance(); continue
-            # skip type keyword(s) — long long is one token now
+            
             if self.current.type == "KEYWORD":
-                self.advance()  # skip type
+                self.advance()  
                 if self.current and self.current.type == "IDENTIFIER":
                     param_name = self.current.value
                     self.advance()
-                    # handle array param int arr[]
+                    
                     if self.current and self.current.type == "LBRACKET":
-                        self.advance()  # skip [
+                        self.advance()  
                         if self.current and self.current.type != "RBRACKET":
-                            self.advance()  # skip size
-                        self.advance()  # skip ]
+                            self.advance()  
+                        self.advance()  
                     params.append(param_name)
                 continue
             self.advance()
 
-        self.advance()  # skip )
+        self.advance()  
         body = self.block()
         return ASTNode("FUNCTION", name, children=[params, body])
     
     def return_statement(self):
-        self.advance()  # skip return
+        self.advance()  
         expr = None
         if self.current and self.current.type != "SEMICOLON":
             expr = self.expression()
@@ -670,7 +679,7 @@ class CodeGenerator:
             for stmt in if_body:
                 generated = self.generate(stmt)
                 for line in generated.split("\n"):
-                    lines.append("    " + line)  # indent EVERY line
+                    lines.append("    " + line)  
 
 
             if else_body:
@@ -679,7 +688,7 @@ class CodeGenerator:
                 for stmt in else_body:
                     generated = self.generate(stmt)
                     for line in generated.split("\n"):
-                        lines.append("    " + line)  # indent EVERY line
+                        lines.append("    " + line)  
 
 
             return "\n".join(lines)
@@ -734,28 +743,28 @@ class CodeGenerator:
             return "\n".join(lines)
         
         if node.type == "FOR":
-            init = node.children[0]       # DECLLIST or ASSIGN
-            condition = node.children[1]  # COMPARE node
-            increment = node.children[2]  # INC or expression
+            init = node.children[0]       
+            condition = node.children[1]  
+            increment = node.children[2]  
             body = node.children[3]
 
-            # Extract start value
+            
             if init.type == "DECLLIST" and init.children:
-                assign = init.children[0]  # ASSIGN node like i = 0
+                assign = init.children[0]  
                 var = assign.value
                 start = self.generate(assign.left)
             else:
                 var = init.value
                 start = "0"
 
-            # Extract stop value from condition (i < n  or  i <= n)
+            
             stop = self.generate(condition.right)
             if condition.value == "<=":
                 stop = f"{stop} + 1"
 
-            # Extract step from increment
+            
             if increment.type == "INC":
-                step = None  # default step 1, no need to write it
+                step = None  
             elif increment.type == "DEC":
                 step = "-1"
             elif increment.type == "PLUSEQ":
@@ -774,7 +783,7 @@ class CodeGenerator:
             for stmt in body:
                 generated = self.generate(stmt)
                 for line in generated.split("\n"):
-                    lines.append("    " + line)  # indent EVERY line, not just first
+                    lines.append("    " + line)  
 
 
             return "\n".join(lines)
@@ -788,29 +797,28 @@ class CodeGenerator:
             fmt = node.value
             args = [self.generate(a) for a in node.children]
 
-            # replace C format specifiers with {} for Python f-string
+            
             import re
-            # count how many %d %f %s %c are in the format string
+            
             specifiers = re.findall(r'%[dfsc]', fmt)
 
-            # clean up the format string
+            
             clean = fmt
-            clean = re.sub(r'%[dfsc]', '{}', clean)  # replace %d %f etc with {}
-            clean = clean.replace('\\n', '')          # remove \n (print adds newline)
-            clean = clean.replace('\\t', '\\t')       # keep \t
+            clean = re.sub(r'%[dfsc]', '{}', clean)  
+            clean = clean.replace('\\n', '')          
+            clean = clean.replace('\\t', '\\t')       
 
             if args and specifiers:
-                # build f-string style: print(f"... is Armstrong {num}")
-                # pair each {} with its arg
+                
                 result = clean
                 for arg in args:
                     result = result.replace('{}', f'{{{arg}}}', 1)
                 return f'print(f"{result}")'
             elif args:
-                # no specifiers but has args — just print args
+                
                 return f'print({", ".join(args)})'
             else:
-                # no args — plain string
+                
                 return f'print("{clean}")'
             
         if node.type == "SCANF":
@@ -827,7 +835,7 @@ class CodeGenerator:
                 elif spec in ("%lld","%ld"):return f"{vars[0]} = int(input())"
                 else:                       return f"{vars[0]} = int(input())"
             else:
-                # check if any are float/char
+            
                 lines = []
                 for i, var in enumerate(vars):
                     spec = specifiers[i] if i < len(specifiers) else "%d"
@@ -856,7 +864,7 @@ class CodeGenerator:
         if node.type == "DECLLIST":
             lines = []
             plain_vars = []
-            type_kw = node.value  # type stored on DECLLIST node
+            type_kw = node.value  
 
             for child in node.children:
                 if child.type == "DECL":
@@ -882,7 +890,7 @@ class CodeGenerator:
             lines = [f"def {name}({', '.join(params)}):"]
 
             for stmt in body:
-                # handle multi-line statements (like DECLLIST with multiple vars)
+            
                 generated = self.generate(stmt)
                 for line in generated.split("\n"):
                     lines.append("    " + line)  
@@ -943,45 +951,3 @@ class CodeGenerator:
             return f"{node.value}[{index}] = {value}"
         if node.type == "BLOCK":
             return "\n".join(self.generate(s) for s in node.children)
-        
-# code = """
-# #include<stdio.h>
-# for(int i=0;i<n;i++)
-# {
-#     //printf("aa");
-#     /*while(j<n)
-#     {
-#     //j++;
-#     }
-
-# }
-# do {*/
-# i++;
-# }
-# while(i<2);
-# int s = 10;
-# printf("%d%d\n",s,s);
-# int a,b,c;
-# scanf("%d%d", &a,&b);
-# int add(int a, int b,int c){
-#     return a || b;
-    
-# }
-# for(int i=0;i<n;i+=1){
-# j*=2;
-# }
-# int arr[5];
-# int arr[]={1,2,3};
-# arr[i+1]=arr[i]*2;
-# """
-# lexer = Lexer(code)
-# tokens = lexer.tokenize()
-# for t in tokens:
-#     print(t.type, t.value)
-# parser = Parser(tokens)
-# ast = parser.parse()
-
-# generator = CodeGenerator()
-# python_code = generator.generate(ast)
-
-# print(python_code)
