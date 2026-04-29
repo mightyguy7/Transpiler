@@ -1,310 +1,314 @@
-from lexer import ASTNode
-
-
-class SemanticError(Exception):
-    pass
-
-
-class SemanticWarning:
-    def __init__(self, message):
+class SemanticError:
+    def __init__(self, level, message):
+        self.level = level
         self.message = message
 
-    def __str__(self):
-        return f"Warning: {self.message}"
+    def __repr__(self):
+        return f"[{self.level}] {self.message}"
 
 
 class SemanticAnalyzer:
 
+    NUMERIC = {"int", "float", "double", "long", "long long", "char"}
+
     def __init__(self):
-        # Stack of scopes: each scope is a dict of name → type_info
-        self.scope_stack = [{}]   # global scope
-        self.functions   = {}     # name → {"params": [...], "return_type": str}
-        self.warnings    = []
+        self.scopes = [{}]
+        self.functions = {}
+        self.issues = []
+        self._current_function = None
 
-    # ── Scope management ──────────────────────────────────────────────────────
+    # scope
 
-    def push_scope(self):
-        self.scope_stack.append({})
+    def _push_scope(self):
+        self.scopes.append({})
 
-    def pop_scope(self):
-        self.scope_stack.pop()
+    def _pop_scope(self):
+        scope = self.scopes.pop()
+        for name, info in scope.items():
+            if not info["used"] and not info.get("error", False):
+                self._warn(f"Variable '{name}' declared but never used")
 
-    def declare(self, name, type_info):
-        """Declare in current (innermost) scope."""
-        self.scope_stack[-1][name] = type_info
+    def _declare(self, name, var_type="unknown"):
+        if name in self.scopes[-1]:
+            self._error(f"Variable '{name}' already declared in this scope")
+            self.scopes[-1][name]["error"] = True
+            return
 
-    def lookup(self, name):
-        """Search from innermost to outermost scope."""
-        for scope in reversed(self.scope_stack):
+        if self._lookup(name) is not None:
+            self._warn(f"Variable '{name}' shadows outer scope variable")
+
+        self.scopes[-1][name] = {
+            "type": var_type,
+            "used": False,
+            "error": False
+        }
+
+    def _lookup(self, name):
+        for scope in reversed(self.scopes):
             if name in scope:
                 return scope[name]
         return None
 
-    def is_declared(self, name):
-        return self.lookup(name) is not None
+    def _mark_used(self, name):
+        for scope in reversed(self.scopes):
+            if name in scope:
+                scope[name]["used"] = True
+                return
 
-    # ── Visitor dispatch ──────────────────────────────────────────────────────
+    # issues
 
-    def visit(self, node):
+    def _error(self, msg):
+        self.issues.append(SemanticError("ERROR", msg))
+
+    def _warn(self, msg):
+        self.issues.append(SemanticError("WARNING", msg))
+
+    # Type Inference 
+
+    def _infer_type(self, node):
+        if node is None:
+            return "unknown"
+
+        if node.type == "NUMBER":
+            return "float" if "." in node.value else "int"
+
+        if node.type == "CHAR":
+            if len(node.value) > 1:
+                self._error(f"Invalid character literal '{node.value}'")
+            return "int"   
+
+        if node.type == "STRING":
+            return "string"
+
+        if node.type == "IDENTIFIER":
+            info = self._lookup(node.value)
+            return info["type"] if info else "unknown"
+
+        if node.type == "CALL":
+            if node.value in self.functions:
+                return self.functions[node.value]["return_type"]
+            return "unknown"
+
+        if node.type == "COMPARE":
+            return "int"  
+
+        if node.type in ("ADD", "SUB", "MUL", "DIV", "MOD"):
+            left = self._infer_type(node.left)
+            right = self._infer_type(node.right)
+
+            if left == "string" or right == "string":
+                self._error(f"Invalid operation between {left} and {right}")
+                return "unknown"
+
+            if "float" in (left, right) or "double" in (left, right):
+                return "float"
+
+            return "int"
+
+        return "unknown"
+
+    def _check_assign_types(self, name, var_type, rhs):
+        if rhs is None:
+            return
+
+        if var_type.endswith("[]"):
+            return
+
+        rhs_type = self._infer_type(rhs)
+
+        if rhs_type == "string" and var_type in self.NUMERIC:
+            self._error(f"Cannot assign string to {var_type} '{name}'")
+
+        if var_type == "string" and rhs_type in self.NUMERIC:
+            self._error(f"Cannot assign {rhs_type} to string '{name}'")
+
+        if var_type == "int" and rhs_type == "float":
+            self._warn(f"Possible loss of precision assigning float to int '{name}'")
+
+        if var_type == "char" and rhs_type == "float":
+            self._warn(f"Assigning float to char '{name}'")
+
+
+    def analyze(self, ast):
+        for child in ast.children:
+            if child.type == "FUNCTION":
+                if child.value in self.functions:
+                    self._error(f"Function '{child.value}' already declared")
+
+                self.functions[child.value] = {
+                    "params": child.children[0],
+                    "return_type": "unknown",}
+
+        self._visit(ast)
+
+        return self.issues
+
+
+    def _visit(self, node):
         if node is None:
             return
-        method = getattr(self, f"visit_{node.type}", self.generic_visit)
-        return method(node)
+        method = getattr(self, f"_visit_{node.type}", self._visit_generic)
+        method(node)
 
-    def generic_visit(self, node):
-        if node.left:
-            self.visit(node.left)
-        if node.right:
-            self.visit(node.right)
-        for child in node.children:
-            if isinstance(child, list):
-                for c in child:
-                    if isinstance(c, ASTNode):
-                        self.visit(c)
-            elif isinstance(child, ASTNode):
-                self.visit(child)
-
-    # ── Program ───────────────────────────────────────────────────────────────
-
-    def visit_PROGRAM(self, node):
-        for child in node.children:
-            self.visit(child)
-
-    # ── Declarations ──────────────────────────────────────────────────────────
-
-    def visit_DECLLIST(self, node):
-        type_kw = node.value
-        for var in node.children:
-            name = var.value
-            if name is not None:
-                if name in self.scope_stack[-1]:
-                    self.warnings.append(
-                        SemanticWarning(f"Variable '{name}' re-declared in the same scope")
-                    )
-                self.declare(name, type_kw)
-            self.visit(var)
-
-    def visit_DECL(self, node):
-        pass  # already handled by DECLLIST
-
-    def visit_ARRAY_DECL(self, node):
-        self.declare(node.value, "array")
-
-    def visit_ARRAY_INIT(self, node):
-        self.declare(node.value, "array")
+    def _visit_generic(self, node):
         for c in node.children:
-            self.visit(c)
+            self._visit(c)
+        self._visit(node.left)
+        self._visit(node.right)
 
-    # ── Assignment ────────────────────────────────────────────────────────────
 
-    def visit_ASSIGN(self, node):
-        # Auto-declare if not yet seen (handles C99 for-loop inits etc.)
-        if not self.is_declared(node.value):
-            self.declare(node.value, "auto")
-        self.visit(node.left)
+    def _visit_PROGRAM(self, node):
+        for c in node.children:
+            self._visit(c)
 
-    def visit_ARRAY_ASSIGN(self, node):
-        if not self.is_declared(node.value):
-            self.warnings.append(
-                SemanticWarning(f"Array '{node.value}' assigned before declaration")
-            )
-            self.declare(node.value, "array")
-        self.visit(node.left)
-        self.visit(node.right)
+    def _visit_FUNCTION(self, node):
+        prev = self._current_function
+        self._current_function = node.value
 
-    def visit_ARRAY_ACCESS(self, node):
-        if not self.is_declared(node.value):
-            self.warnings.append(
-                SemanticWarning(f"Array '{node.value}' used before declaration")
-            )
-        self.visit(node.left)
+        self._push_scope()
 
-    # ── Compound assignments ───────────────────────────────────────────────────
+        for p in node.children[0]:
+            self._declare(p, "int")
+            self._mark_used(p)
 
-    def _visit_compound(self, node):
-        lhs = node.left
-        if lhs and lhs.type == "IDENTIFIER" and not self.is_declared(lhs.value):
-            raise SemanticError(
-                f"Variable '{lhs.value}' used in compound assignment before declaration"
-            )
-        self.generic_visit(node)
+        for stmt in node.children[1]:
+            self._visit(stmt)
 
-    def visit_PLUSEQ(self, node):   self._visit_compound(node)
-    def visit_MINUSEQ(self, node):  self._visit_compound(node)
-    def visit_MULEQ(self, node):    self._visit_compound(node)
-    def visit_DIVEQ(self, node):    self._visit_compound(node)
-    def visit_MODEQ(self, node):    self._visit_compound(node)
+        self._pop_scope()
+        self._current_function = prev
 
-    # ── Identifiers ───────────────────────────────────────────────────────────
+    def _visit_DECLLIST(self, node):
+        for child in node.children:
+            if child.type == "DECL":
+                self._declare(child.value, node.value)
 
-    def visit_IDENTIFIER(self, node):
-        if not self.is_declared(node.value):
-            self.warnings.append(
-                SemanticWarning(f"Variable '{node.value}' used before declaration")
-            )
+            elif child.type == "ASSIGN":
+                self._declare(child.value, node.value)
+                self._check_assign_types(child.value, node.value, child.left)
+                self._visit(child.left)
 
-    # ── Increment / Decrement ─────────────────────────────────────────────────
+            else:
+                self._visit(child)
 
-    def visit_INC(self, node):
-        if not self.is_declared(node.value):
-            raise SemanticError(f"Variable '{node.value}' incremented before declaration")
+    def _visit_ASSIGN(self, node):
+        info = self._lookup(node.value)
 
-    def visit_DEC(self, node):
-        if not self.is_declared(node.value):
-            raise SemanticError(f"Variable '{node.value}' decremented before declaration")
+        if info is None:
+            self._error(f"Assignment to undeclared variable '{node.value}'")
+        else:
+            self._mark_used(node.value)
+            self._check_assign_types(node.value, info["type"], node.left)
 
-    def visit_POST_INC(self, node):
-        if node.left:
-            self.visit(node.left)
+        self._visit(node.left)
 
-    def visit_POST_DEC(self, node):
-        if node.left:
-            self.visit(node.left)
+    def _visit_IDENTIFIER(self, node):
+        if self._lookup(node.value) is None and node.value not in self.functions:
+            self._error(f"Use of undeclared variable '{node.value}'")
+        else:
+            self._mark_used(node.value)
 
-    # ── Control flow ──────────────────────────────────────────────────────────
-
-    def visit_IF(self, node):
-        self.visit(node.left)           # condition
-        self.push_scope()
-        for stmt in node.children[0]:   # if-body
-            self.visit(stmt)
-        self.pop_scope()
-        self.push_scope()
-        for stmt in node.children[1]:   # else-body
-            self.visit(stmt)
-        self.pop_scope()
-
-    def visit_WHILE(self, node):
-        self.visit(node.left)
-        self.push_scope()
-        for stmt in node.children:
-            self.visit(stmt)
-        self.pop_scope()
-
-    def visit_DO_WHILE(self, node):
-        self.push_scope()
-        for stmt in node.children:
-            self.visit(stmt)
-        self.pop_scope()
-        self.visit(node.left)
-
-    def visit_FOR(self, node):
-        self.push_scope()
-        self.visit(node.children[0])   # init
-        self.visit(node.children[1])   # condition
-        self.visit(node.children[2])   # increment
-        for stmt in node.children[3]:  # body
-            self.visit(stmt)
-        self.pop_scope()
-
-    def visit_BREAK(self, node):    pass
-    def visit_CONTINUE(self, node): pass
-
-    # ── Functions ─────────────────────────────────────────────────────────────
-
-    def visit_FUNCTION(self, node):
-        name   = node.value
-        params = node.children[0]   # list of strings
-        body   = node.children[1]   # list of ASTNodes
-
-        # Register function signature in global scope
-        self.functions[name] = {"params": params, "return_type": "auto"}
-        self.declare(name, "function")
-
-        self.push_scope()
-        for p in params:
-            self.declare(p, "param")
-        for stmt in body:
-            self.visit(stmt)
-        self.pop_scope()
-
-    def visit_RETURN(self, node):
-        if node.left:
-            self.visit(node.left)
-
-    # ── Calls ─────────────────────────────────────────────────────────────────
-
-    def visit_CALL(self, node):
-        # Check argument count if function is defined
-        if node.value in self.functions:
+    def _visit_CALL(self, node):
+        if node.value not in self.functions:
+            self._error(f"Call to undeclared function '{node.value}'")
+        else:
             expected = len(self.functions[node.value]["params"])
-            actual   = len(node.children)
-            if actual != expected:
-                self.warnings.append(
-                    SemanticWarning(
-                        f"Function '{node.value}' called with {actual} arg(s), "
-                        f"expected {expected}"
-                    )
-                )
-        for a in node.children:
-            self.visit(a)
+            got = len(node.children)
 
-    # ── I/O ───────────────────────────────────────────────────────────────────
+            if expected != got:
+                self._warn(f"Function '{node.value}' expects {expected}, got {got}")
 
-    def visit_PRINTF(self, node):
-        import re
-        fmt        = node.value
-        specifiers = re.findall(r'%(?:lld|ld|lf|[dfiucs])', fmt)
-        args       = node.children
+        for arg in node.children:
+            self._visit(arg)
 
-        if len(specifiers) != len(args):
-            self.warnings.append(
-                SemanticWarning(
-                    f"printf: {len(specifiers)} format specifier(s) but "
-                    f"{len(args)} argument(s)"
-                )
-            )
-        for a in args:
-            self.visit(a)
+    def _visit_RETURN(self, node):
+        if self._current_function is None:
+            self._error("return outside function")
+            return
 
-    def visit_SCANF(self, node):
-        import re
-        fmt        = node.value
-        specifiers = re.findall(r'%(?:lld|ld|lf|[dfiucs])', fmt)
-        vars_      = node.children
+        rtype = self._infer_type(node.left)
+        self.functions[self._current_function]["return_type"] = rtype
 
-        if len(specifiers) != len(vars_):
-            self.warnings.append(
-                SemanticWarning(
-                    f"scanf: {len(specifiers)} format specifier(s) but "
-                    f"{len(vars_)} variable(s)"
-                )
-            )
+        self._visit(node.left)
 
-        # Determine type from specifier and declare variable
-        spec_to_type = {
-            "%d": "int",   "%i": "int",   "%u": "int",
-            "%ld": "long", "%lld": "long long",
-            "%f": "float", "%lf": "double",
-            "%c": "char",  "%s": "char",
-        }
-        for i, var in enumerate(vars_):
-            if isinstance(var, ASTNode) and var.value:
-                spec  = specifiers[i] if i < len(specifiers) else "%d"
-                dtype = spec_to_type.get(spec, "int")
-                if not self.is_declared(var.value):
-                    self.declare(var.value, dtype)
+    def _validate_condition(self, node):
+        t = self._infer_type(node)
+        if t not in self.NUMERIC:
+            self._warn(f"Condition uses non-numeric type '{t}'")
 
-    # ── Misc ──────────────────────────────────────────────────────────────────
+    def _visit_IF(self, node):
+        self._validate_condition(node.left)
 
-    def visit_COMMENT(self, node):
-        pass
+        self._push_scope()
+        for s in node.children[0]:
+            self._visit(s)
+        self._pop_scope()
 
-    def visit_BLOCK(self, node):
-        self.push_scope()
-        for stmt in node.children:
-            self.visit(stmt)
-        self.pop_scope()
+        if node.children[1]:
+            self._push_scope()
+            for s in node.children[1]:
+                self._visit(s)
+            self._pop_scope()
 
-    def visit_NUMBER(self, node):   pass
-    def visit_STRING(self, node):   pass
-    def visit_CHAR(self, node):     pass
-    def visit_COMPARE(self, node):  self.generic_visit(node)
-    def visit_ADD(self, node):      self.generic_visit(node)
-    def visit_SUB(self, node):      self.generic_visit(node)
-    def visit_MUL(self, node):      self.generic_visit(node)
-    def visit_DIV(self, node):      self.generic_visit(node)
-    def visit_MOD(self, node):      self.generic_visit(node)
-    def visit_AND(self, node):      self.generic_visit(node)
-    def visit_OR(self, node):       self.generic_visit(node)
-    def visit_NOT(self, node):      self.generic_visit(node)
+    def _visit_WHILE(self, node):
+        self._validate_condition(node.left)
+
+        self._push_scope()
+        for s in node.children:
+            self._visit(s)
+        self._pop_scope()
+
+    def _visit_FOR(self, node):
+        self._push_scope()
+        for part in node.children:
+            if isinstance(part, list):
+                for s in part:
+                    self._visit(s)
+            else:
+                self._visit(part)
+        self._pop_scope()
+
+    def _visit_ARRAY_ASSIGN(self, node):
+        if self._lookup(node.value) is None:
+            self._error(f"Undeclared array '{node.value}'")
+
+        self._visit(node.left)
+        self._visit(node.right)
+
+    def _visit_ARRAY_ACCESS(self, node):
+        if self._lookup(node.value) is None:
+            self._error(f"Undeclared array '{node.value}'")
+
+        self._visit(node.left)
+
+    def _visit_INC(self, node):
+        if self._lookup(node.value) is None:
+            self._error(f"Increment undeclared '{node.value}'")
+
+    def _visit_DEC(self, node):
+        if self._lookup(node.value) is None:
+            self._error(f"Decrement undeclared '{node.value}'")
+
+    def _visit_SCANF(self, node):
+        for var in node.children:
+            if self._lookup(var) is None:
+                self._error(f"scanf undeclared '{var}'")
+            else:
+                self._mark_used(var)
+
+    def _visit_PRINTF(self, node):
+        for arg in node.children:
+            self._visit(arg)
+
+    def _visit_DIV(self, node):
+        if node.right and node.right.type == "NUMBER" and node.right.value == "0":
+            self._error("Division by zero")
+        self._visit(node.left)
+        self._visit(node.right)
+
+
+class SemanticAnalysisError(Exception):
+    def __init__(self, issues):
+        self.issues = issues
+        super().__init__(
+            "\n".join(str(i) for i in issues if i.level == "ERROR")
+        )

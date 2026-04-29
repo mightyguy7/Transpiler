@@ -1,11 +1,8 @@
 from flask import Flask, render_template, request, jsonify
-
 from lexer import Lexer, Parser, CodeGenerator
-from semantic import SemanticAnalyzer
-from optimizer import Optimizer
+from semantic import SemanticAnalyzer, SemanticAnalysisError
 
 app = Flask(__name__)
-
 
 def translate_c_to_python(c_code):
     try:
@@ -15,24 +12,31 @@ def translate_c_to_python(c_code):
         parser = Parser(tokens)
         ast = parser.parse()
 
-        semantic = SemanticAnalyzer()
-        semantic.visit(ast)
-        # Optionally log warnings: semantic.warnings
+        #  Semantic analysis
+        analyzer = SemanticAnalyzer()
+        issues = analyzer.analyze(ast)
 
-        optimizer = Optimizer()
-        ast = optimizer.optimize(ast)
+        warnings = [i.message for i in issues if i.level == "WARNING"]
+        errors   = [i.message for i in issues if i.level == "ERROR"]
 
+        if errors:
+            error_block = "\n".join(f"[ERROR] {e}" for e in errors)
+            warning_block = "\n".join(f"[WARNING] {w}" for w in warnings)
+            return (warning_block + "\n" + error_block).strip()
         generator = CodeGenerator()
-        return generator.generate(ast)
+        python_code = generator.generate(ast)
+        if warnings:
+            warning_block = "\n".join(f"# [WARNING] {w}" for w in warnings)
+            return warning_block + "\n\n" + python_code
+
+        return python_code
 
     except Exception as e:
         return f"Error during translation: {str(e)}"
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
-
 
 @app.route('/translate', methods=['POST'])
 def translate():
@@ -41,7 +45,5 @@ def translate():
     python_code = translate_c_to_python(c_code)
     return jsonify({"python_code": python_code})
 
-
 if __name__ == '__main__':
-    print("Starting Flask server...")
     app.run(debug=True)
