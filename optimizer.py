@@ -5,18 +5,18 @@ class Optimizer:
         if node is None:
             return None
 
-        # 🟢 handle list
+        
         if isinstance(node, list):
             return [self.optimize(n) for n in node]
 
-        # 🔴 FIX: handle string
+        
         if not hasattr(node, "type"):
             return node
 
         method = getattr(self, f"_opt_{node.type}", self._generic)
         return method(node)
 
-    # ---------------- GENERIC ----------------
+    
 
     def _generic(self, node):
         if not hasattr(node, "type"):
@@ -39,7 +39,7 @@ class Optimizer:
         node.children = new_children
         return node
 
-    # ---------------- CONSTANT FOLDING ----------------
+    
 
     def _is_number(self, node):
         return node and node.type == "NUMBER"
@@ -72,12 +72,12 @@ class Optimizer:
 
         return node
 
-    # ---------------- ADD ----------------
+    
 
     def _opt_ADD(self, node):
         node = self._generic(node)
 
-        # x + 0 → x
+        
         if self._is_number(node.right) and node.right.value == "0":
             return node.left
         if self._is_number(node.left) and node.left.value == "0":
@@ -85,29 +85,29 @@ class Optimizer:
 
         return self._fold_binary(node, "+")
 
-    # ---------------- SUB ----------------
+    
 
     def _opt_SUB(self, node):
         node = self._generic(node)
 
-        # x - 0 → x
+        
         if self._is_number(node.right) and node.right.value == "0":
             return node.left
 
         return self._fold_binary(node, "-")
 
-    # ---------------- MUL ----------------
+    
 
     def _opt_MUL(self, node):
         node = self._generic(node)
 
-        # x * 1 → x
+        
         if self._is_number(node.right) and node.right.value == "1":
             return node.left
         if self._is_number(node.left) and node.left.value == "1":
             return node.right
 
-        # x * 0 → 0
+        
         if self._is_number(node.right) and node.right.value == "0":
             return ASTNode("NUMBER", "0")
         if self._is_number(node.left) and node.left.value == "0":
@@ -115,30 +115,30 @@ class Optimizer:
 
         return self._fold_binary(node, "*")
 
-    # ---------------- DIV ----------------
+    
 
     def _opt_DIV(self, node):
         node = self._generic(node)
 
-        # x / 1 → x
+        
         if self._is_number(node.right) and node.right.value == "1":
             return node.left
 
         return self._fold_binary(node, "/")
 
-    # ---------------- MOD ----------------
+    
 
     def _opt_MOD(self, node):
         node = self._generic(node)
         return self._fold_binary(node, "%")
 
-    # ---------------- CONSTANT PROPAGATION ----------------
+    
 
     def _opt_PROGRAM(self, node):
-        # PASS 1 → fold
+        
         node = self._generic(node)
 
-        # PASS 2 → propagate
+        
         env = {}
         new_children = []
 
@@ -153,7 +153,7 @@ class Optimizer:
 
         node.children = new_children
 
-        # 🔥 PASS 3 → fold again
+        
         node = self._generic(node)
 
         return node
