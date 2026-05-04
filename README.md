@@ -22,7 +22,9 @@ The main goal is to design and implement a transcompiler that:
 1. Understand syntax of C and Python  
 2. Implement compiler phases:
    - Lexical Analysis  
-   - Syntax Analysis  
+   - Syntax Analysis
+   - Semantic Analysis
+   - Code Optimization 
    - Code Generation  
 3. Generate correct Python output without logic change  
 
@@ -42,7 +44,13 @@ C Code → Lexer → Parser → Intermediate Representation → Code Generator �
 **2. Syntax Analysis**
 - Builds structure using grammar rules
 
-**3. Code Generation**
+**3. Semantic Analysis**
+- Checks meaning and logic
+
+**4. Code Optimization**
+- Makes code efficient
+
+**5. Code Generation**
 - Converts structure into Python syntax
 
 ---
